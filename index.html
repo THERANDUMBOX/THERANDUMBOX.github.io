@@ -1,0 +1,1271 @@
+<!-- Yes it's basically all Ai lol (dw its the thought that counts frfr) -->
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Iris's Journal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Kalam:wght@400;700&display=swap" rel="stylesheet">
+<style>
+/* ============================================================
+   RANDUMBOX Field Journal — stylesheet
+   Palette: worn leather + brass + aged parchment
+   ------------------------------------------------------------
+   THIS PASS:
+   - Removed the glitch/chromatic-split buildup entirely.
+   - Player-page effect is now: a slow buildup of screen shake +
+     blur (ramping from nothing to a full blur), then a brief
+     full-white flash (a fraction of a second), then the seven
+     lights (six in a hexagon, one in the center) simply appear
+     — no growing — while the background stays blurred and
+     shaking with only a very slight, fixed chromatic separation,
+     alongside a vignette, then everything fades back to normal.
+   ============================================================ */
+
+:root {
+  --wood-1: #1b140f;
+  --wood-2: #2a1f17;
+  --cover: #283a2c;
+  --cover-dark: #172219;
+  --brass: #b6905a;
+  --brass-light: #e6c98f;
+  --parchment: #ecdfc2;
+  --parchment-edge: #d9c59a;
+  --ink: #3f2a18;
+  --ink-soft: #6b4a30;
+  --page-w: 1460px;
+  --page-h: 910px;
+}
+
+/* Registering --buildup as a real animatable number means CSS can
+   transition it smoothly on its own — no JS per-frame loop needed,
+   which is what made the blur choppy before. Every property that
+   reads var(--buildup) (blur, brightness, shake magnitude) then
+   interpolates smoothly along with it. Keep the 3s duration below
+   in sync with BUILDUP_DURATION in the script. */
+@property --buildup {
+  syntax: '<number>';
+  inherits: true;
+  initial-value: 0;
+}
+
+html {
+  --buildup: 0;
+  transition: --buildup 3s linear;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px 12px;
+  background:
+    radial-gradient(ellipse at 50% 20%, rgba(255, 220, 170, 0.06), transparent 60%),
+    repeating-linear-gradient(90deg, var(--wood-1) 0 2px, var(--wood-2) 2px 40px);
+  font-family: 'Patrick Hand', cursive;
+  color: var(--ink);
+  overflow-x: hidden;
+}
+
+.scene {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  transition: filter 0.15s linear;
+}
+
+.scene.locked {
+  visibility: hidden;
+}
+
+/* Blurring this whole scene (3D page transforms, drop-shadows, per-page
+   noise textures) is expensive to re-rasterize every frame — that cost,
+   not the animation curve, is what reads as "choppy". will-change hints
+   the browser to keep this on its own GPU layer instead of repainting
+   the full tree each frame. */
+.scene.buildup-active,
+.scene.final-active {
+  will-change: filter, transform;
+}
+
+/* While blurred, the fine noise/foxing textures on the open page are
+   invisible anyway but still cost to render before the blur is applied —
+   hide them for the duration to lighten the per-frame work. */
+.scene.buildup-active .page .face::before,
+.scene.buildup-active .page .face::after,
+.scene.final-active .page .face::before,
+.scene.final-active .page .face::after {
+  opacity: 0;
+}
+
+/* Phase 1: buildup — shake + blur ramp from 0 to full, driven by
+   the --buildup custom property (0 -> 1). No color-channel split.
+   A continuous ease (not discrete steps) keeps the tremor itself
+   from reading as its own source of chop. */
+.scene.buildup-active {
+  animation: buildupShake 0.6s ease-in-out infinite;
+  filter:
+    blur(calc(var(--buildup, 0) * 16px))
+    brightness(calc(1 + var(--buildup, 0) * 0.1));
+}
+
+@keyframes buildupShake {
+  0%, 100% { transform: translate(0, 0); }
+  25%      { transform: translate(calc(var(--buildup, 0) * -6px), calc(var(--buildup, 0) * 4px)); }
+  50%      { transform: translate(calc(var(--buildup, 0) * 5px), calc(var(--buildup, 0) * -4px)); }
+  75%      { transform: translate(calc(var(--buildup, 0) * -4px), calc(var(--buildup, 0) * 5px)); }
+}
+
+/* Phase 3: after the flash — the lights are up, background stays
+   blurred and shaking, with just a very slight, fixed chromatic
+   separation (via the SVG filter, offsets kept small in JS). */
+.scene.final-active {
+  animation: screenShake 0.4s ease-in-out infinite;
+  filter: url(#chromaGlitch) blur(4px);
+}
+
+@keyframes screenShake {
+  0%, 100% { transform: translate(0, 0); }
+  25%      { transform: translate(-4px, 3px); }
+  50%      { transform: translate(3px, -3px); }
+  75%      { transform: translate(-3px, -2px); }
+}
+
+.hint {
+  font-size: 0.95rem;
+  letter-spacing: 0.02em;
+  color: var(--brass-light);
+  opacity: 0.75;
+  font-style: italic;
+}
+
+/* ---------------- the book ---------------- */
+
+.stage {
+  position: relative;
+  width: clamp(320px, 96vw, var(--page-w));
+  aspect-ratio: 1460 / 910;
+  perspective: 2800px;
+  filter: drop-shadow(0 30px 40px rgba(0, 0, 0, 0.55));
+}
+
+.endpaper {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 50%;
+  z-index: 1;
+  background:
+    linear-gradient(90deg, rgba(0,0,0,0.18), transparent 12%),
+    var(--cover-dark);
+  border: 6px solid var(--cover-dark);
+}
+
+.endpaper-left { left: 0; border-radius: 10px 0 0 10px; }
+.endpaper-right { right: 0; border-radius: 0 10px 10px 0; }
+
+.book-spine {
+  position: absolute;
+  left: 50%;
+  top: -2%;
+  height: 104%;
+  width: 26px;
+  margin-left: -13px;
+  z-index: 150;
+  background: linear-gradient(90deg,
+    rgba(0,0,0,0.55), rgba(0,0,0,0.15) 30%, rgba(0,0,0,0.15) 70%, rgba(0,0,0,0.55));
+  pointer-events: none;
+}
+
+/* Each page/cover pivots around the spine (its own left edge) */
+.page {
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 50%;
+  height: 100%;
+  transform-style: preserve-3d;
+  transform-origin: left center;
+  transform: rotateY(0deg);
+  transition: transform 0.85s cubic-bezier(.45, .05, .18, 1);
+  cursor: pointer;
+}
+
+.page.flipped { transform: rotateY(-180deg); }
+
+.page .face {
+  position: absolute;
+  inset: 0;
+  backface-visibility: hidden;
+  background: var(--parchment);
+  border: 1px solid var(--parchment-edge);
+  padding: 58px 52px 44px;
+  overflow: hidden;
+  box-shadow: inset 0 0 46px rgba(107, 74, 48, 0.20), inset 0 0 110px rgba(0, 0, 0, 0.07);
+}
+
+.page .face.back { transform: rotateY(180deg); }
+
+.page[data-index="0"] .face.front {
+  left: -100%;
+  width: 200%;
+}
+
+/* Aged, filthy paper texture — heavier foxing, dark spots, coffee rings + scratches + grain */
+.page .face::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    radial-gradient(circle at 85% 15%, transparent 0 16px, rgba(20,13,7,0.55) 17px, rgba(20,13,7,0.25) 23px, transparent 30px),
+    radial-gradient(circle at 30% 70%, transparent 0 9px, rgba(15,10,5,0.5) 10px, rgba(15,10,5,0.2) 16px, transparent 22px),
+    radial-gradient(circle at 12% 22%, rgba(15,10,5,0.42), transparent 10%),
+    radial-gradient(circle at 90% 80%, rgba(15,10,5,0.38), transparent 13%),
+    radial-gradient(circle at 45% 92%, rgba(15,10,5,0.34), transparent 11%),
+    radial-gradient(circle at 6% 88%, rgba(15,10,5,0.34), transparent 11%),
+    radial-gradient(circle at 70% 42%, rgba(15,10,5,0.28), transparent 14%),
+    radial-gradient(circle at 30% 55%, rgba(8,5,2,0.42), transparent 7%),
+    radial-gradient(circle at 60% 10%, rgba(8,5,2,0.38), transparent 6%),
+    radial-gradient(circle at 20% 42%, rgba(8,5,2,0.32), transparent 9%),
+    radial-gradient(circle at 92% 46%, rgba(8,5,2,0.36), transparent 6%),
+    radial-gradient(circle at 55% 78%, rgba(8,5,2,0.30), transparent 8%),
+    radial-gradient(circle at 78% 60%, transparent 52%, rgba(15,10,5,0.26) 56%, transparent 62%),
+    radial-gradient(circle at 15% 55%, rgba(8,5,2,0.30), transparent 6%),
+    radial-gradient(circle at 68% 88%, rgba(8,5,2,0.30), transparent 7%),
+    radial-gradient(circle at 40% 30%, rgba(8,5,2,0.26), transparent 8%),
+    radial-gradient(circle at 8% 8%, rgba(8,5,2,0.30), transparent 9%),
+    radial-gradient(circle at 95% 25%, rgba(8,5,2,0.32), transparent 7%),
+    radial-gradient(circle at 25% 12%, rgba(8,5,2,0.26), transparent 6%),
+    radial-gradient(circle at 82% 92%, rgba(8,5,2,0.28), transparent 8%);
+}
+
+.page .face::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  mix-blend-mode: multiply;
+  opacity: 0.30;
+  background-image:
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='160' height='160'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='1.35' numOctaves='4' stitchTiles='stitch'/><feColorMatrix type='matrix' values='0 0 0 0 0.14  0 0 0 0 0.09  0 0 0 0 0.05  0 0 0 1 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>"),
+    repeating-linear-gradient(73deg, rgba(15,10,5,0.22) 0px, rgba(15,10,5,0.22) 1px, transparent 1px, transparent 20px),
+    repeating-linear-gradient(-51deg, rgba(15,10,5,0.18) 0px, rgba(15,10,5,0.18) 1px, transparent 1px, transparent 30px),
+    repeating-linear-gradient(12deg, rgba(15,10,5,0.15) 0px, rgba(15,10,5,0.15) 1px, transparent 1px, transparent 40px),
+    repeating-linear-gradient(-25deg, rgba(15,10,5,0.13) 0px, rgba(15,10,5,0.13) 1px, transparent 1px, transparent 52px);
+  background-size: 130px 130px, auto, auto, auto, auto;
+}
+
+.page-number {
+  position: absolute;
+  bottom: 14px;
+  font-family: 'Kalam', cursive;
+  font-size: 1rem;
+  color: var(--ink-soft);
+  opacity: 0.75;
+}
+.face.front .page-number { right: 22px; }
+.face.back .page-number { left: 22px; }
+
+/* -------------- cover / back cover -------------- */
+
+.face.cover-face {
+  background:
+    linear-gradient(160deg, rgba(255,255,255,0.04), transparent 40%),
+    var(--cover);
+  border: 10px solid var(--cover-dark);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 18px;
+}
+
+.cover-emblem {
+  width: 92px;
+  height: 92px;
+  border: 3px solid var(--brass);
+  border-radius: 255px 15px 225px 15px/15px 225px 15px 255px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--brass-light);
+  font-family: 'Kalam', cursive;
+  font-weight: 700;
+  font-size: 2.4rem;
+  transform: rotate(-3deg);
+}
+
+.cover-title {
+  font-family: 'Kalam', cursive;
+  font-weight: 700;
+  color: var(--brass-light);
+  font-size: clamp(2rem, 4vw, 2.9rem);
+  line-height: 1.1;
+  transform: rotate(-1deg);
+}
+
+.cover-sub {
+  font-family: 'Kalam', cursive;
+  color: var(--brass);
+  font-size: 1rem;
+  letter-spacing: 0.08em;
+}
+
+.cover-cta {
+  margin-top: 6px;
+  font-family: 'Kalam', cursive;
+  font-size: 1.2rem;
+  color: var(--brass-light);
+  border: 1px solid var(--brass);
+  border-radius: 999px;
+  padding: 8px 22px;
+  opacity: 0.9;
+}
+
+/* -------------- text content (right / recto page) -------------- */
+
+.entry-heading {
+  font-family: 'Kalam', cursive;
+  font-weight: 700;
+  color: var(--ink);
+  font-size: 2.3rem;
+  margin: 0 0 10px;
+  line-height: 1.15;
+  transform: rotate(-0.6deg);
+}
+
+.entry-text {
+  font-size: 1.85rem;
+  line-height: 1.48;
+  color: var(--ink);
+  text-align: left;
+  max-width: 62ch;
+  letter-spacing: 0.01em;
+}
+
+.entry-text p { margin: 0 0 0.9em; }
+
+.entry-text p.lead::first-letter {
+  font-family: 'Kalam', cursive;
+  font-weight: 700;
+  font-size: 3.4rem;
+  line-height: 0.7;
+  float: left;
+  padding: 4px 8px 0 0;
+  color: var(--brass);
+}
+
+/* -------------- color coding -------------- */
+
+.w-red {
+  color: #b31217;
+  font-weight: 700;
+}
+
+.w-pink {
+  color: #d94f95;
+  font-weight: 700;
+}
+
+.redacted-bar {
+  background: #141414;
+  color: #141414;
+  padding: 1px 9px;
+  border-radius: 2px;
+  user-select: none;
+}
+
+.death-line {
+  margin: 0 0 4px;
+  font-family: 'Kalam', cursive;
+  font-weight: 700;
+  font-size: 1.7rem;
+  color: #b31217;
+}
+
+.intel-line {
+  display: inline-block;
+  margin: 0;
+  font-family: 'Kalam', cursive;
+  font-weight: 700;
+  font-size: 1.4rem;
+  color: #3f2a18;
+  background: #fff35c;
+  padding: 3px 12px;
+  border-radius: 3px;
+  transform: rotate(-1.4deg);
+  box-shadow: 1px 1px 0 rgba(0,0,0,0.08);
+}
+
+/* -------------- character profile (left / verso page) -------------- */
+
+.face.back.char-back {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.char-left {
+  height: 100%;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 4px;
+}
+
+.char-left-name {
+  font-family: 'Kalam', cursive;
+  font-weight: 700;
+  color: var(--ink);
+  font-size: 2.6rem;
+  line-height: 1.15;
+  margin: 0 0 8px;
+  transform: rotate(0.8deg);
+}
+
+.vitals {
+  margin: 0;
+  padding-top: 12px;
+  border-top: 1px solid var(--parchment-edge);
+  max-width: 320px;
+}
+
+/* -------------- RSQ3-style scattered / redacted page -------------- */
+
+.entry-text.scatter-wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-content: flex-start;
+  align-items: flex-start;
+  gap: 34px 30px;
+  min-height: 600px;
+}
+
+.scatter-frag {
+  position: static;
+  font-family: 'Kalam', cursive;
+  font-weight: 700;
+  font-size: 1.35rem;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+.scatter-frag.redacted-bar {
+  font-size: 1.15rem;
+}
+
+/* -------------- nav controls -------------- */
+
+.nav {
+  position: absolute;
+  top: 50%;
+  z-index: 200;
+  transform: translateY(-50%);
+  background: var(--brass);
+  color: var(--cover-dark);
+  border: none;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  font-size: 1.1rem;
+  cursor: pointer;
+  box-shadow: 0 4px 10px rgba(0,0,0,0.4);
+  transition: background 0.2s, transform 0.15s;
+}
+.nav:hover:not(:disabled) { background: var(--brass-light); }
+.nav:active:not(:disabled) { transform: translateY(-50%) scale(0.94); }
+.nav:disabled { opacity: 0.3; cursor: default; }
+.nav-prev { left: -60px; }
+.nav-next { right: -60px; }
+
+.counter {
+  font-family: 'Kalam', cursive;
+  color: var(--brass-light);
+  font-size: 1.1rem;
+  opacity: 0.85;
+}
+
+.page:focus-visible { outline: 3px solid var(--brass-light); outline-offset: 4px; }
+.nav:focus-visible { outline: 3px solid var(--parchment); outline-offset: 3px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .page { transition: none; }
+}
+
+/* -------------- username modal -------------- */
+
+#nameModal {
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background:
+    radial-gradient(ellipse at 50% 30%, rgba(80,60,40,0.4), rgba(8,6,5,0.94));
+}
+
+.modal-card {
+  background: var(--parchment);
+  border: 3px solid var(--brass);
+  border-radius: 12px 40px 12px 40px / 40px 12px 40px 12px;
+  padding: 40px 46px;
+  text-align: center;
+  max-width: 380px;
+  width: 88%;
+  box-shadow: 0 20px 50px rgba(0,0,0,0.6);
+}
+
+.modal-card h2 {
+  font-family: 'Kalam', cursive;
+  font-weight: 700;
+  font-size: 1.6rem;
+  margin: 0 0 10px;
+  color: var(--ink);
+}
+
+.modal-card .modal-sub {
+  font-family: 'Patrick Hand', cursive;
+  font-size: 1.15rem;
+  margin: 0 0 18px;
+  color: var(--ink-soft);
+}
+
+.modal-card input {
+  font-family: 'Patrick Hand', cursive;
+  font-size: 1.25rem;
+  padding: 9px 14px;
+  width: 100%;
+  border: 2px solid var(--ink-soft);
+  border-radius: 8px;
+  margin-bottom: 18px;
+  background: #fbf3df;
+  color: var(--ink);
+}
+
+.modal-card input:focus {
+  outline: 2px solid var(--brass);
+}
+
+.modal-card button {
+  font-family: 'Kalam', cursive;
+  font-weight: 700;
+  font-size: 1.15rem;
+  padding: 9px 26px;
+  border-radius: 999px;
+  border: none;
+  background: var(--cover);
+  color: var(--brass-light);
+  cursor: pointer;
+}
+.modal-card button:hover { background: var(--cover-dark); }
+
+/* -------------- vignette -------------- */
+
+#screenVignette {
+  position: fixed;
+  inset: 0;
+  z-index: 490;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 32%, rgba(0,0,0,0.55) 72%, rgba(0,0,0,0.92) 100%);
+  transition: opacity 0.6s ease;
+}
+#screenVignette.active { opacity: 1; }
+
+/* low-opacity white wash behind the lights, for ambient brightness
+   without blowing the individual lights into one blob */
+#screenWhiteWash {
+  position: fixed;
+  inset: 0;
+  z-index: 495;
+  pointer-events: none;
+  opacity: 0;
+  background: #ffffff;
+  transition: opacity 0.6s ease;
+}
+#screenWhiteWash.active { opacity: 0.18; }
+
+/* full, brief white flash between the buildup and the lights.
+   Fade OUT is a real transition (below); fade IN is instant — the
+   .active rule overrides the transition to 0s so it snaps straight
+   to full opacity. */
+#screenFlash {
+  position: fixed;
+  inset: 0;
+  z-index: 600;
+  pointer-events: none;
+  opacity: 0;
+  background: #ffffff;
+  transition: opacity 0.35s ease-out;
+}
+#screenFlash.active {
+  opacity: 1;
+  transition: opacity 0s;
+}
+
+/* -------------- seven lights: hexagon + center (after the flash) --------------
+   Fixed size, fixed spacing — sized so all seven sit comfortably
+   on screen with real gaps between them. They just appear/glow;
+   they never grow. */
+
+#hexFlash {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.5s ease;
+}
+#hexFlash.active { opacity: 1; }
+
+.hcircle {
+  position: absolute;
+  left: calc(50% + var(--ox));
+  top: calc(50% + var(--oy));
+  width: 13vmin;
+  height: 13vmin;
+  transform: translate(-50%, -50%);
+  border-radius: 50%;
+  background: #ffffff;
+  opacity: 0;
+  box-shadow:
+    0 0 20px 8px rgba(255,255,255,0.7),
+    0 0 45px 18px rgba(255,255,255,0.4);
+  transition: opacity 0.25s ease, box-shadow 0.25s ease;
+}
+#hexFlash.lit .hcircle {
+  opacity: 1;
+  box-shadow:
+    0 0 14px 12px rgba(255,255,255,1),
+    0 0 30px 28px rgba(255,255,255,0.8),
+    0 0 55px 55px rgba(255,255,255,0.45);
+}
+
+/* hexagon (circumradius 20vmin, so side length = 20vmin — bigger
+   than the 13vmin light diameter, leaving a real gap) + one light
+   dead center. Max reach from center is 20+6.5 = 26.5vmin, well
+   inside any viewport. */
+.hc1 { --ox: 0vmin;     --oy: -20vmin; }
+.hc2 { --ox: 17.3vmin;  --oy: -10vmin; }
+.hc3 { --ox: 17.3vmin;  --oy: 10vmin;  }
+.hc4 { --ox: 0vmin;     --oy: 20vmin;  }
+.hc5 { --ox: -17.3vmin; --oy: 10vmin;  }
+.hc6 { --ox: -17.3vmin; --oy: -10vmin; }
+.hc7 { --ox: 0vmin;     --oy: 0vmin;   }
+
+#whoAmI {
+  position: fixed;
+  bottom: 40px;
+  left: 0;
+  right: 0;
+  text-align: center;
+  font-family: 'Kalam', cursive;
+  font-weight: 700;
+  font-size: 2rem;
+  color: #fff;
+  text-shadow: 0 0 12px #000, 0 0 24px rgba(255,255,255,0.6);
+  opacity: 0;
+  z-index: 700;
+  pointer-events: none;
+  transition: opacity 0.6s ease;
+}
+#whoAmI.show { opacity: 1; }
+
+/* -------------- mobile: single page, hinge at left -------------- */
+
+@media (max-width: 680px) {
+  .stage { aspect-ratio: 550 / 740; }
+  .endpaper-left { display: none; }
+  .book-spine { left: 0; width: 14px; margin-left: 0; }
+  .page {
+    left: 0;
+    width: 100%;
+    transform-origin: left center;
+  }
+  .page[data-index="0"] .face.front,
+  .page[data-index="0"] .face.back {
+    left: 0;
+    width: 100%;
+  }
+  .nav-prev { left: 6px; }
+  .nav-next { right: 6px; }
+}
+</style>
+</head>
+<body>
+
+  <div id="nameModal">
+    <div class="modal-card">
+      <h2>Before you open this journal...</h2>
+      <p class="modal-sub">Enter your Minecraft Username</p>
+      <input id="nameInput" type="text" maxlength="24" placeholder="Username" autocomplete="off" />
+      <br />
+      <button id="nameSubmit">Begin Reading</button>
+    </div>
+  </div>
+
+  <div class="scene locked" id="sceneRoot">
+    <div class="hint">click the page edge, use the arrows, or press ← / →</div>
+    <div class="stage" id="stage">
+      <div class="endpaper endpaper-left"></div>
+      <div class="endpaper endpaper-right"></div>
+      <div class="book-spine"></div>
+      <!-- pages are injected by script below -->
+      <button class="nav nav-prev" id="prevBtn" aria-label="Previous page">&#10094;</button>
+      <button class="nav nav-next" id="nextBtn" aria-label="Next page">&#10095;</button>
+    </div>
+    <div class="counter" id="counter"></div>
+  </div>
+
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <filter id="chromaGlitch" x="-20%" y="-20%" width="140%" height="140%" color-interpolation-filters="sRGB">
+        <feColorMatrix in="SourceGraphic" type="matrix"
+          values="1 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 1 0" result="redCh"/>
+        <feOffset in="redCh" dx="0" dy="0" result="redOff" id="chromaRedOffset"/>
+        <feColorMatrix in="SourceGraphic" type="matrix"
+          values="0 0 0 0 0  0 1 0 0 0  0 0 0 0 0  0 0 0 1 0" result="greenCh"/>
+        <feColorMatrix in="SourceGraphic" type="matrix"
+          values="0 0 0 0 0  0 0 0 0 0  0 0 1 0 0  0 0 0 1 0" result="blueCh"/>
+        <feOffset in="blueCh" dx="0" dy="0" result="blueOff" id="chromaBlueOffset"/>
+        <feBlend in="redOff" in2="greenCh" mode="screen" result="rg"/>
+        <feBlend in="rg" in2="blueOff" mode="screen"/>
+      </filter>
+    </defs>
+  </svg>
+  <div id="screenVignette"></div>
+  <div id="screenWhiteWash"></div>
+  <div id="screenFlash"></div>
+  <div id="hexFlash">
+    <span class="hcircle hc1"></span>
+    <span class="hcircle hc2"></span>
+    <span class="hcircle hc3"></span>
+    <span class="hcircle hc4"></span>
+    <span class="hcircle hc5"></span>
+    <span class="hcircle hc6"></span>
+    <span class="hcircle hc7"></span>
+  </div>
+  <div id="whoAmI">DO YOU REMEMBER?</div>
+
+<script>
+/* ============================================================
+   RANDUMBOX Field Journal — page data + flip logic
+   ------------------------------------------------------------
+   HOW TO ADD MORE PAGES:
+   Extend the `entries` array below. Each item is one sheet of
+   paper. Shape:
+
+     { type: 'character', name: 'Name', heading: '...',
+       intelligence: '...', death: '...' (optional),
+       body: ['para1', 'para2'] }
+
+   The name + vitals render on the LEFT page (drawn onto the
+   back of whatever sheet comes right before this entry in
+   `entries` — so the first character's card lands on the
+   inside of the front cover). The heading + body render on this
+   entry's own page, on the RIGHT.
+
+   Use <span class="w-red">...</span> / class="w-pink" /
+   class="redacted-bar" inline in body text or death/intelligence
+   strings for the color coding.
+
+   `scatterFragments` (instead of `body`) scatters short lines
+   randomly across the right page instead of normal paragraphs —
+   used for the RSQ3 Manager entry.
+
+   `special: 'playerCutscene'` triggers the buildup/flash/lights
+   sequence while that entry is on screen.
+   ============================================================ */
+
+const coverPage = { type: 'cover' };
+const backCoverPage = { type: 'backcover' };
+
+const playerEntry = {
+  type: 'character',
+  special: 'playerCutscene',
+  name: '',
+  heading: '',
+  intelligence: 'High Intelligence',
+  death: '<span class="redacted-bar">REDACTED</span>',
+  body: [
+    '…',
+    '…',
+    "They're so strong.",
+    'They must be the one to finally end this.',
+    'As long as nothing interferes.',
+  ],
+};
+
+const entries = [
+  {
+    type: 'character',
+    name: 'The Void Pyromancer',
+    heading: 'The Void Pyromancer',
+    intelligence: 'High intelligence',
+    death: 'Death is like being burned alive.',
+    body: [
+      `His abilities are awfully similar to what I can do... but I'm stronger in some places and in other places I'm weaker. The rift he created is very impressive… A whole dimension within just one point of the space continuum… And his control over the <span class="w-pink">Sapphires</span> is intimidating.`,
+      `From my time with him, it seems like he didn't really care about <span class="w-red">the mission</span> and was just focused on the <span class="w-pink">Power of the Sapphires</span>.`,
+      `I wouldn't be surprised if under that hood, we were the same species.`,
+    ],
+  },
+  {
+    type: 'character',
+    name: 'Killbots',
+    heading: 'Killbots',
+    intelligence: 'Low Intelligence',
+    body: [
+      `These… are the players that died because of me. I must never forget them. I don't even want to know how these things are created. It must be truly cruel. The Infernal Tech Lord must've pressured Eternal Doom into this… Eternal Doom usually respects the fallen. I guess he didn't want to look weak.`,
+      `They seriously affect my progress to my goal.`,
+    ],
+  },
+  {
+    type: 'character',
+    name: 'Nyx',
+    heading: 'Nyx',
+    intelligence: 'Medium Intelligence',
+    death: 'Death feels like your soul is being sucked out of you.',
+    body: [
+      `She gets the least intel about the overarching <span class="w-red">mission</span>. She's more often at the frontlines than the other <span class="w-red">Randumbox</span> Guardians. Still, she's strong. I think I could beat her in a fight, not comfortably though.`,
+    ],
+  },
+  {
+    type: 'character',
+    name: 'Infernal Tech Lord',
+    heading: 'Infernal Tech Lord',
+    intelligence: 'Utmost Intelligence',
+    death: 'Death is painless and sudden.',
+    body: [
+      `He is a player, which is insane. The existence of this player terrifies me. He is the only one besides the One Above All who has figured out how to mess with the fabric of <span class="w-red">THE RANDUMBOX</span>. I remember his 'Terminal Of Doom' from the night we stole <span class="w-red">THE RANDUMBOX</span>. It instantly knocked out and stunned the other Witherlords.`,
+    ],
+  },
+  {
+    type: 'character',
+    name: 'Paragon',
+    heading: 'Paragon',
+    intelligence: 'High Intelligence??',
+    body: [
+      `His real name is Nova.`,
+      `His combat wisdom is insane. Even more than Eternal Doom. Though he doesn't have Eternal Doom's raw strength, which is why he can't simply take him on. His Orb Of Parality is super cool. I should get one of my own.`,
+    ],
+  },
+  {
+    type: 'character',
+    name: 'One Above All',
+    heading: 'One Above All',
+    intelligence: 'Utmost intelligence',
+    body: [
+      `He's super strong but he's locked to the Heavens and Forest. That's why Eternal Doom can't step foot their. The <span class="redacted-bar">REDACTED</span> is not safe though. Neither is The <span class="redacted-bar">REDACTED</span> or The <span class="redacted-bar">REDACTED</span>, though he has no reason to attack those.`,
+    ],
+  },
+  {
+    type: 'character',
+    name: 'Eternal Doom',
+    heading: 'Eternal Doom',
+    intelligence: 'Utmost intelligence',
+    body: [
+      `His species is called the Witherlords. Their lifespans tend to be 130 years… but Eternal Doom has been around for 600 at this point. How?? Furthermore… he's hundreds of times stronger than others in his species. It doesn't make sense. His species is able to slightly use the power of the <span class="w-red">Randumbox</span> without opening it, but only about 0.3%. Eternal Doom can use 2%. Clearly something had happened.`,
+      `Maybe something to just him… His species has lived comfortably and in luxury. They never cared if others suffered. Why does Eternal Doom actually care for others? It's seriously uncommon of his species. I think that has something to do with his drive for the <span class="w-red">mission</span>.`,
+    ],
+  },
+  {
+    type: 'character',
+    name: 'RSQ3 Manager',
+    heading: 'RSQ3 Manager',
+    intelligence: 'Utmost intelligence',
+    death: 'Death is unknown to me.',
+    scatterFragments: [
+      { text: 'REDACTED TEXT', redacted: true },
+      { text: 'KILLBOT? Red eyes indicate a computerish vibe' },
+      { text: 'REDACTED TEXT', redacted: true },
+      { text: 'These DIARES…' },
+      { text: 'REDACTED TEXT', redacted: true },
+      { text: 'WHY SO ODD' },
+      { text: 'REDACTED TEXT', redacted: true },
+      { text: 'MAKING ME GO INSANE' },
+      { text: 'REDACTED TEXT', redacted: true },
+      { text: 'OH NO I KNOW WHO THIS IS' },
+      { text: 'REDACTED TEXT', redacted: true },
+      { text: 'PROJECT FIREBIRD' },
+      { text: 'REDACTED TEXT', redacted: true },
+      { text: 'KILLBOT SO ADVANCED' },
+      { text: 'GHASTS? VEXES' },
+      { text: "IT'S REGANAM" },
+      { text: 'CANT LET ******** FIGURE OUT' },
+    ],
+  },
+  playerEntry,
+];
+
+const pages = [coverPage, ...entries, backCoverPage];
+
+/* ---------------- seeded random (still used for scatter layout) ---------------- */
+
+function seedFromString(str) {
+  let h = 0;
+  for (let i = 0; i < str.length; i++) { h = (h * 31 + str.charCodeAt(i)) >>> 0; }
+  return h || 1;
+}
+
+function mulberry32(a) {
+  return function () {
+    a |= 0; a = (a + 0x6D2B79F5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/* ---------------- rendering ---------------- */
+
+const sceneRoot = document.getElementById('sceneRoot');
+const stage = document.getElementById('stage');
+const prevBtn = document.getElementById('prevBtn');
+const nextBtn = document.getElementById('nextBtn');
+const counter = document.getElementById('counter');
+
+let current = 0;
+
+function buildFace(pageData, faceType, index) {
+  const face = document.createElement('div');
+  face.className = 'face ' + faceType;
+
+  if (pageData.type === 'cover') {
+    face.classList.add('cover-face');
+    face.innerHTML = `
+      <div class="cover-emblem">I</div>
+      <div class="cover-title">Iris's Journal</div>
+      <div class="cover-cta">open to begin</div>
+    `;
+    return face;
+  }
+
+  if (pageData.type === 'backcover') {
+    face.classList.add('cover-face');
+    face.innerHTML = `
+      <div class="cover-emblem">I</div>
+      <div class="cover-title">fin.</div>
+      <div class="cover-sub">MORE ENTRIES SOON</div>
+    `;
+    return face;
+  }
+
+  const wrap = document.createElement('div');
+  wrap.className = 'entry-text';
+
+  if (pageData.heading) {
+    const h = document.createElement('h2');
+    h.className = 'entry-heading';
+    h.textContent = pageData.heading;
+    wrap.appendChild(h);
+  }
+
+  if (pageData.scatterFragments) {
+    wrap.classList.add('scatter-wrap');
+    const rand = mulberry32(seedFromString((pageData.name || 'scatter') + index));
+    pageData.scatterFragments.forEach((frag) => {
+      const el = document.createElement('div');
+      el.className = 'scatter-frag' + (frag.redacted ? ' redacted-bar' : '');
+      el.textContent = frag.text;
+      el.style.transform = `rotate(${(rand() * 14 - 7).toFixed(1)}deg) translateY(${(rand() * 10 - 5).toFixed(1)}px)`;
+      wrap.appendChild(el);
+    });
+  } else {
+    (pageData.body || []).forEach((para, idx) => {
+      const p = document.createElement('p');
+      if (idx === 0) p.classList.add('lead');
+      p.innerHTML = para;
+      wrap.appendChild(p);
+    });
+  }
+
+  face.appendChild(wrap);
+
+  const num = document.createElement('span');
+  num.className = 'page-number';
+  num.textContent = index;
+  face.appendChild(num);
+
+  return face;
+}
+
+function buildCharacterLeftFace(pageData) {
+  const wrap = document.createElement('div');
+  wrap.className = 'char-left';
+
+  if (pageData.name) {
+    const h = document.createElement('h2');
+    h.className = 'char-left-name';
+    h.textContent = pageData.name;
+    wrap.appendChild(h);
+  }
+
+  if (pageData.death || pageData.intelligence) {
+    const vitals = document.createElement('div');
+    vitals.className = 'vitals';
+    if (pageData.death) {
+      const d = document.createElement('p');
+      d.className = 'death-line';
+      d.innerHTML = pageData.death;
+      vitals.appendChild(d);
+    }
+    if (pageData.intelligence) {
+      const iq = document.createElement('p');
+      iq.className = 'intel-line';
+      iq.innerHTML = pageData.intelligence;
+      vitals.appendChild(iq);
+    }
+    wrap.appendChild(vitals);
+  }
+
+  return wrap;
+}
+
+function init() {
+  pages.forEach((pageData, i) => {
+    const pageEl = document.createElement('div');
+    pageEl.className = 'page';
+    pageEl.dataset.index = i;
+
+    const front = buildFace(pageData, 'front', i);
+
+    const back = document.createElement('div');
+    back.className = 'face back';
+    const nextPageData = pages[i + 1];
+    if (nextPageData && nextPageData.type === 'character') {
+      back.classList.add('char-back');
+      back.appendChild(buildCharacterLeftFace(nextPageData));
+    }
+    if (pageData.type !== 'cover' && pageData.type !== 'backcover') {
+      const backNum = document.createElement('span');
+      backNum.className = 'page-number';
+      backNum.textContent = i;
+      back.appendChild(backNum);
+    }
+
+    front.classList.add('front');
+    pageEl.appendChild(front);
+    pageEl.appendChild(back);
+
+    pageEl.addEventListener('click', () => {
+      const idx = Number(pageEl.dataset.index);
+      if (idx === current) next();
+      else if (idx === current - 1) prev();
+    });
+
+    stage.appendChild(pageEl);
+  });
+
+  render();
+}
+
+function render() {
+  const pageEls = stage.querySelectorAll('.page');
+  pageEls.forEach((el) => {
+    const i = Number(el.dataset.index);
+    if (i < current) {
+      el.classList.add('flipped');
+      el.style.zIndex = 100 + i;
+    } else {
+      el.classList.remove('flipped');
+      el.style.zIndex = 100 - i;
+    }
+  });
+
+  prevBtn.disabled = current <= 0;
+  nextBtn.disabled = current >= pages.length - 1;
+
+  const total = entries.length;
+  if (current === 0) {
+    counter.textContent = `${total} entries — closed`;
+  } else if (current >= pages.length - 1) {
+    counter.textContent = `Entry ${total} of ${total} — the end`;
+  } else {
+    counter.textContent = `Entry ${current} of ${total}`;
+  }
+
+  const cur = pages[current];
+  if (cur && cur.special === 'playerCutscene') {
+    startInsanity();
+  } else {
+    clearInsanity();
+  }
+}
+
+function next() {
+  if (current < pages.length - 1) {
+    current += 1;
+    render();
+  }
+}
+
+function prev() {
+  if (current > 0) {
+    current -= 1;
+    render();
+  }
+}
+
+prevBtn.addEventListener('click', prev);
+nextBtn.addEventListener('click', next);
+
+window.addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowRight') next();
+  if (e.key === 'ArrowLeft') prev();
+});
+
+/* ---------------- buildup / flash / lights sequence ----------------
+   Phase 1 — a slow buildup: screen shake and blur both ramp from
+   nothing up to a full, heavy blur (no color-channel splitting
+   anywhere in this phase).
+   Phase 2 — once fully blurred, the screen flashes solid white for
+   just a fraction of a second.
+   Phase 3 — the flash cuts out and the seven lights (a hexagon of
+   six plus one dead center) simply appear — no growing — and glow
+   hard. Everything behind them stays blurred and shaking, with
+   only a very slight, fixed chromatic separation, alongside a
+   vignette and a "Who Am I?" flash while they're lit.
+   Phase 4 — everything fades back down to the normal book.
+------------------------------------------------------------- */
+
+let insanityTimers = [];
+const chromaRedOffset = document.getElementById('chromaRedOffset');
+const chromaBlueOffset = document.getElementById('chromaBlueOffset');
+
+// Sets --buildup with no transition, for instant resets (page changes,
+// the moment the flash cuts in) instead of a 3s glide back to 0.
+function setBuildupInstant(value) {
+  const root = document.documentElement;
+  root.style.transitionProperty = 'none';
+  root.style.setProperty('--buildup', value);
+  void root.offsetHeight; // force a reflow so 'none' actually applies first
+  root.style.transitionProperty = '';
+}
+
+function clearInsanity() {
+  insanityTimers.forEach((t) => clearTimeout(t));
+  insanityTimers = [];
+  setBuildupInstant(0);
+  chromaRedOffset.setAttribute('dx', 0);
+  chromaRedOffset.setAttribute('dy', 0);
+  chromaBlueOffset.setAttribute('dx', 0);
+  chromaBlueOffset.setAttribute('dy', 0);
+  sceneRoot.classList.remove('buildup-active', 'final-active');
+  document.getElementById('screenFlash').classList.remove('active');
+  document.getElementById('hexFlash').classList.remove('active', 'lit');
+  document.getElementById('screenVignette').classList.remove('active');
+  document.getElementById('screenWhiteWash').classList.remove('active');
+  document.getElementById('whoAmI').classList.remove('show');
+}
+
+function startInsanity() {
+  clearInsanity();
+
+  const BUILDUP_START = 4000;
+  const BUILDUP_DURATION = 3000; // keep in sync with the --buildup transition duration in CSS
+  const BUILDUP_END = BUILDUP_START + BUILDUP_DURATION;
+  const FLASH_HOLD = 100;  // time the flash sits at full white before fading
+  const FLASH_FADE = 350;  // fade-out duration — keep in sync with #screenFlash's CSS transition
+  const LIGHTS_AT = BUILDUP_END + FLASH_HOLD; // lights start appearing as the flash begins fading
+
+  // Phase 1: shake + blur smoothly ramp up. Setting --buildup to 1 here just
+  // hands it to the CSS transition (see :root) — the browser interpolates it
+  // natively, so blur/brightness/shake-magnitude (all driven by this one
+  // variable) glide smoothly with no janky per-frame JS involved.
+  insanityTimers.push(setTimeout(() => {
+    sceneRoot.classList.add('buildup-active');
+    document.documentElement.style.setProperty('--buildup', 1);
+  }, BUILDUP_START));
+
+  // Phase 2: fully blurred — flash solid white at max opacity, instantly
+  insanityTimers.push(setTimeout(() => {
+    sceneRoot.classList.remove('buildup-active');
+    document.getElementById('screenFlash').classList.add('active');
+  }, BUILDUP_END));
+
+  // Phase 3: the flash starts fading out (over FLASH_FADE) while, underneath
+  // it, the lights appear and the background settles into blurred/shaking
+  // with just a very slight, fixed chromatic separation
+  insanityTimers.push(setTimeout(() => {
+    document.getElementById('screenFlash').classList.remove('active');
+    setBuildupInstant(0);
+
+    chromaRedOffset.setAttribute('dx', -1.5);
+    chromaRedOffset.setAttribute('dy', 0.5);
+    chromaBlueOffset.setAttribute('dx', 1.5);
+    chromaBlueOffset.setAttribute('dy', -0.5);
+
+    sceneRoot.classList.add('final-active');
+    document.getElementById('screenVignette').classList.add('active');
+    document.getElementById('screenWhiteWash').classList.add('active');
+    document.getElementById('hexFlash').classList.add('active', 'lit');
+  }, LIGHTS_AT));
+
+  insanityTimers.push(setTimeout(() => {
+    document.getElementById('whoAmI').classList.add('show');
+  }, LIGHTS_AT + 300));
+
+  insanityTimers.push(setTimeout(() => {
+    document.getElementById('whoAmI').classList.remove('show');
+  }, LIGHTS_AT + 4500));
+
+  // Phase 4: fade everything back down to the normal book
+  insanityTimers.push(setTimeout(() => {
+    document.getElementById('hexFlash').classList.remove('lit');
+  }, LIGHTS_AT + 4700));
+
+  insanityTimers.push(setTimeout(() => {
+    sceneRoot.classList.remove('final-active');
+    chromaRedOffset.setAttribute('dx', 0);
+    chromaRedOffset.setAttribute('dy', 0);
+    chromaBlueOffset.setAttribute('dx', 0);
+    chromaBlueOffset.setAttribute('dy', 0);
+    document.getElementById('screenVignette').classList.remove('active');
+    document.getElementById('screenWhiteWash').classList.remove('active');
+    document.getElementById('hexFlash').classList.remove('active');
+  }, LIGHTS_AT + 5100));
+}
+
+/* ---------------- username gate ---------------- */
+
+const nameModal = document.getElementById('nameModal');
+const nameInput = document.getElementById('nameInput');
+const nameSubmit = document.getElementById('nameSubmit');
+
+function beginJournal() {
+  const val = nameInput.value.trim();
+  const playerName = val.length ? val.slice(0, 24) : 'Traveler';
+  playerEntry.name = playerName;
+  playerEntry.heading = playerName;
+
+  nameModal.style.display = 'none';
+  sceneRoot.classList.remove('locked');
+  init();
+}
+
+nameSubmit.addEventListener('click', beginJournal);
+nameInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') beginJournal();
+});
+nameInput.focus();
+</script>
+</body>
+</html>
